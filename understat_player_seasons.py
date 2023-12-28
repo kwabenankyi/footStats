@@ -4,7 +4,7 @@ from selenium.webdriver.common.keys import *
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from time import sleep
+from time import sleep, asctime
 from findNameLength import *
 import sqlite3
 
@@ -14,6 +14,8 @@ class Database():
         self.__cursor = self.__conn.cursor()
         self.__returnedResult = []
     
+    def close(self):
+        self.__conn.close()
     def select(self, command:str):
         self.__result=self.__cursor.execute("SELECT "+command)
         self.__conn.commit()
@@ -94,8 +96,9 @@ class Database():
         
     def addPlayerPosition(self,playerID,position,year,apps,mins,goals,nPG,assists,xG,xNPG,xA,xGChain,xGBuildup,shotsPer90,keyPassPer90,yellowCards,redCards):
         self.__cursor.execute(f'INSERT INTO Positions(playerID,position,year,apps,mins,goals,nPG,assists,xG,xNPG,xA,xGChain,xGBuildup,shotsPer90,keyPassPer90,yellowCards,redCards) VALUES({playerID},"{position}","{year}",{apps},{mins},{goals},{nPG},{assists},{xG},{xNPG},{xA},{xGChain},{xGBuildup},{shotsPer90},{keyPassPer90},{yellowCards},{redCards})')
-        self.__conn.commit()
     
+    def commit(self):
+        self.__conn.commit()
     def checkPlayerPosition(self,playerID,position,year,apps,latestseason):
         self.__result=self.__cursor.execute(f'SELECT positionID, year FROM Positions WHERE playerID={playerID} AND year="{year}" AND position="{position}" AND apps={apps}')
         try:
@@ -106,7 +109,7 @@ class Database():
             if row[1] == latestseason:
                     self.__cursor.execute(f'DELETE FROM Positions WHERE positionID={playerID} AND year="{year}"')
                     print("Current season position stats being updated for")
-            return None
+        return None
 
 def getName(dri):
     return dri.find_element(By.XPATH,"/html/body/div[1]/header/div").text
@@ -119,23 +122,31 @@ def getDivision(dri,teamName,year):#go to club season page, then find league sta
     league = dri.find_element(By.XPATH,f"/html/body/div[1]/div[3]/ul/li[2]/a").text
     return league
 
-def selectAdditionalStats(driver,flag=0):#procedure
+def selectAdditionalStats(driver,flag=0,actions=None):#procedure
     #click options
-    driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[1]/button").click()
+    sleep(0.5)
+    wait=WebDriverWait(driver,5,0.1)
+    wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[1]/button"))).click()
     #click labels - NPG, npXG, yellow cards, red cards
-    wait=WebDriverWait(driver,15)
     wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[7]/div[2]/label"))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[12]/div[2]/label"))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[23]/div[2]/label"))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[24]/div[2]/label"))).click()
     #apply changes
     if flag == 1:#click labels for xGChain and xGBuildup
-        actions = ActionChains(driver)
         actions.move_to_element(driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[14]/div[2]/label")).perform()
         driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[14]/div[2]/label").click()
         driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[2]/div/div[15]/div[2]/label").click()
     driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/div[2]/div[3]/a[2]").click()
+
+def clickPosition(driver,actions):
     sleep(0.5)
+    wait=WebDriverWait(driver,5,0.1)
+    actions.move_to_element(driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[1]/label[2]")).perform()
+    wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[1]/label[2]"))).click() #click on positions
+    driver.execute_script("window.scrollTo(291,188)") #scroll to bottom of page
+    wait.until(EC.element_to_be_clickable((By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[2]/div/div"))).click()
+    return driver.find_elements(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[2]/div/ul/li")
 
 def removeComp(x):
     for i in range (len(x)):
@@ -143,54 +154,53 @@ def removeComp(x):
             return x[:i]
     return x
 
-def recordPosition(database:Database,driver:webdriver,num:int,start:int):
+def recordPosition(database:Database,driver:webdriver,num:int,start:int,latestseason:str):
     link='https://understat.com/player/'+str(num)
     driver.get(link)
-    
+    actions = ActionChains(driver)
     if num==start:
-        sleep(1)
         try:
-            selectAdditionalStats(driver,flag=1)
-            driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[1]/label[2]").click()#go to positions
-            sleep(0.1)
-            playerName=getName(driver)
+            selectAdditionalStats(driver,flag=1,actions=actions)
         except:
-            print("404 error - player",num,"doesn't exist.")
+            print("404 error - player",num,"can't be recorded.")
             return False
-    
     #get table for positions on page
-    driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[2]/div/div").click()
-    list_of_years = driver.find_elements(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[1]/div[2]/div/ul/li")
     try:
-        allpos=[]
-        playerID=database.retrievePlayerID(playerName,num)
-        for elem in list_of_years:
-            elem.click()
-            season=elem.text
-            print(season)
-            selectPositionsTable = driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/table")
-            x=selectPositionsTable.text.split('\n')
-            #splits each row in the table into an individual position
-            positions=[]
-            for position in x:
-                positions.append(position.split(' '))
-
-            positions.pop(len(positions)-1)#removes total
-            for row in positions:
-                if row[1] not in allpos:
-                    allpos.append(row[1])
-                row[9] = removeComp(row[9])
-                row[10] = removeComp(row[10])
-                row[11] = removeComp(row[11])
-                print(row)
-                database.addPlayerPosition(playerID,row[1],season,int(row[2]),int(row[3]),int(row[4]),int(row[5]),int(row[6]),float(row[9]),float(row[10]),float(row[11]),float(row[12]),float(row[13]),float(row[7]),float(row[8]),int(row[16]),int(row[17]))
-                #database.addPlayerPosition(playerID,row[1],season,row[2])
-                #retrieves or creates player ID
-            elem.click()
-        print(num,playerName,allpos)
+        playerName=getName(driver)
+        list_of_years = clickPosition(driver,actions)
     except:
-        print("No positions available for player",num)
+        print(F"Page internal table error at id {num}.")
         return False
+    allpos=[]
+    playerID=database.retrievePlayerID(playerName,num)
+    wait=WebDriverWait(driver,15,0.1)
+    for elem in list_of_years:
+        actions.move_to_element(elem).perform()
+        wait.until(EC.element_to_be_clickable(elem)).click()
+        season=elem.text
+        selectPositionsTable = driver.find_element(By.XPATH,"/html/body/div[1]/div[3]/div[2]/div/div[2]/table")
+        #splits each row in the table into an individual position
+        positions=[]
+        for position in selectPositionsTable.text.split('\n'):
+            positions.append(position.split(' '))
+
+        positions.pop(len(positions)-1)#removes total
+        positions.pop(0)#removes position header
+        for row in positions:
+            if row[1] not in allpos:
+                allpos.append(row[1])
+            row[9] = removeComp(row[9])
+            row[10] = removeComp(row[10])
+            row[11] = removeComp(row[11])
+            ppid = database.checkPlayerPosition(playerID,row[1],season,int(row[2]),latestseason)
+            if ppid is None:
+                database.addPlayerPosition(playerID,row[1],season,int(row[2]),int(row[3]),int(row[4]),int(row[5]),int(row[6]),float(row[9]),float(row[10]),float(row[11]),float(row[12]),float(row[13]),float(row[7]),float(row[8]),int(row[16]),int(row[17]))
+            #database.addPlayerPosition(playerID,row[1],season,row[2])
+            #retrieves or creates player ID
+        elem.click()
+        database.commit()
+    print(asctime(),num,playerName,sorted(allpos))
+    return True
 
 def recordSeason(database:Database,driver:webdriver,num:int,start:int,latestseason:str):
     #get website then link and select additional stats
